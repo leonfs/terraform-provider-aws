@@ -3,21 +3,22 @@ layout: "aws"
 page_title: "AWS: aws_lex_bot_alias"
 sidebar_current: "docs-aws-resource-lex-bot-alias"
 description: |-
-  Provides an Amazon Lex bot alias resource.
+  Provides an Amazon Lex Bot Alias resource.
 ---
 
 # aws_lex_bot_alias
 
-Provides an [Amazon Lex](https://docs.aws.amazon.com/lex/latest/dg/what-is.html) bot alias resource.
+Provides an Amazon Lex Bot Alias resource. For more information see 
+[Amazon Lex: How It Works](https://docs.aws.amazon.com/lex/latest/dg/how-it-works.html)
 
 ## Example Usage
 
 ```hcl
-resource "aws_lex_bot_alias" "florist_bot_v1" {
-  bot_name = "FloristBot"
+resource "aws_lex_bot_alias" "order_flowers_prod" {
+  bot_name    = "OrderFlowers"
   bot_version = "1"
-  description = "Version 1 of the Florist Bot."
-  name = "FloristBotV1"
+  description = "Production Version of the OrderFlowers Bot."
+  name        = "OrderFlowersProd"
 }
 ```
 
@@ -27,23 +28,42 @@ The following arguments are supported:
 
 ### Required
 
-* `bot_name, type=string, min=1, max=100, pattern=^([A-Za-z]_?)+$`
+* `bot_name`
 
 	The name of the bot.
 
-* `bot_version, type=string, min=1, max=64, pattern=\$LATEST|[0-9]+`
+	* Type: string
+	* Min: 1
+	* Max: 100
+	* Pattern: ^([A-Za-z]_?)+$
+
+* `bot_version`
 
 	The name of the bot.
 
-* `name, type=string, min=1, max=100, pattern=^([A-Za-z]_?)+$`
+	* Type: string
+	* Min: 1
+	* Max: 64
+	* Pattern: \$LATEST|[0-9]+
+
+* `name`
 
 	The name of the alias. The name is not case sensitive.
 
+	* Type: string
+	* Min: 1
+	* Max: 100
+	* Pattern: ^([A-Za-z]_?)+$
+
 ### Optional
 
-* `description, type=string, min=0, max=200`
+* `description`
 
 	A description of the alias.
+
+	* Type: string
+	* Min: 0
+	* Max: 200
 
 ## Attributes Reference
 
@@ -68,5 +88,5 @@ The following attributes are exported in addition to the arguments listed above:
 Bot aliases can be imported using an ID with the format BotName.BotAliasName.
 
 ```
-$ terraform import aws_lex_bot_alias.florist_bot_v1 FloristBot.FloristBotV1
+$ terraform import aws_lex_bot_alias.order_flowers_prod OrderFlowers.OrderFlowersProd
 ```

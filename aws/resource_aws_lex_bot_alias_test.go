@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
+	"github.com/aws/aws-sdk-go/service/lexmodelbuildingservice"
 	"github.com/hashicorp/terraform/helper/acctest"
 	"github.com/hashicorp/terraform/helper/resource"
 	"github.com/hashicorp/terraform/terraform"
@@ -12,39 +14,38 @@ import (
 
 func TestAccLexBotAlias(t *testing.T) {
 	resourceName := "aws_lex_bot_alias.test"
-	testId := "test_" + acctest.RandStringFromCharSet(8, acctest.CharSetAlpha)
+	testId := acctest.RandStringFromCharSet(8, acctest.CharSetAlpha)
+	testBotId := "test_bot_" + testId
+	testBotAliasId := "test_bot_alias_" + testId
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
-		CheckDestroy: checkLexBotAliasDestroy(testId),
+		CheckDestroy: checkLexBotAliasDestroy(testBotAliasId),
 		Steps: []resource.TestStep{
 			{
 				Config: fmt.Sprintf(testLexBotAliasConfig, testId),
 				Check: resource.ComposeTestCheckFunc(
-					// Validate Terraform state
-
 					resource.TestCheckResourceAttrSet(resourceName, "bot_name"),
 					resource.TestCheckResourceAttrSet(resourceName, "bot_version"),
-					resource.TestCheckResourceAttrSet(resourceName, "checksum"),
-					resource.TestCheckResourceAttrSet(resourceName, "created_date"),
 					resource.TestCheckResourceAttrSet(resourceName, "description"),
-					resource.TestCheckResourceAttrSet(resourceName, "last_updated_date"),
 					resource.TestCheckResourceAttrSet(resourceName, "name"),
+
+					checkResourceStateComputedAttr(resourceName, resourceAwsLexBotAlias()),
 				),
 			},
 			{
 				ResourceName:      resourceName,
-				ImportStateId:     fmt.Sprintf("%[1]s.%[1]s", testId),
+				ImportStateId:     fmt.Sprintf("%s.%s", testBotId, testBotAliasId),
 				ImportState:       true,
 				ImportStateVerify: true,
 			},
 			{
 				Config: fmt.Sprintf(testLexBotAliasUpdateConfig, testId),
 				Check: resource.ComposeTestCheckFunc(
-					// Validate Terraform state
-
 					resource.TestCheckResourceAttr(resourceName, "description", "Testing lex bot alias update."),
+
+					checkResourceStateComputedAttr(resourceName, resourceAwsLexBotAlias()),
 				),
 			},
 		},
@@ -53,7 +54,13 @@ func TestAccLexBotAlias(t *testing.T) {
 
 func checkLexBotAliasDestroy(id string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		_, err := getLexBot(id)
+		conn := testAccProvider.Meta().(*AWSClient).lexmodelconn
+
+		_, err := conn.GetBot(&lexmodelbuildingservice.GetBotInput{
+			Name:           aws.String(id),
+			VersionOrAlias: aws.String("$LATEST"),
+		})
+
 		if err != nil {
 			aerr, ok := err.(awserr.Error)
 			if ok && aerr.Code() == "NotFoundException" {
@@ -68,6 +75,14 @@ func checkLexBotAliasDestroy(id string) resource.TestCheckFunc {
 }
 
 const testLexBotAliasConfig = `
+resource "aws_lex_intent" "test_intent_one" {
+  fulfillment_activity {
+    type = "ReturnIntent"
+  }
+
+  name = "test_intent_one_%[1]s"
+}
+
 resource "aws_lex_bot" "test" {
   abort_statement {
     message {
@@ -87,25 +102,38 @@ resource "aws_lex_bot" "test" {
     }
   }
 
+  description = "Bot to order flowers on the behalf of a user"
+
+  idle_session_ttl_in_seconds = 600
+
   intent {
-    intent_name    = "OrderFlowers"
-    intent_version = "1"
+    intent_name    = "${aws_lex_intent.test_intent_one.name}"
+    intent_version = "${aws_lex_intent.test_intent_one.version}"
   }
 
-  name             = "%[1]s"
+  locale           = "en-US"
+  name             = "test_bot_%[1]s"
+  process_behavior = "SAVE"
+  voice_id         = "Salli"
 }
 
 resource "aws_lex_bot_alias" "test" {
   bot_name    = "${aws_lex_bot.test.name}"
   bot_version = "${aws_lex_bot.test.version}"
   description = "Testing lex bot alias create."
-  name        = "%[1]s"
-
-  depends_on  = ["aws_lex_bot.test"]
+  name        = "test_bot_alias_%[1]s"
 }
 `
 
 const testLexBotAliasUpdateConfig = `
+resource "aws_lex_intent" "test_intent_one" {
+  fulfillment_activity {
+    type = "ReturnIntent"
+  }
+
+  name = "test_intent_one_%[1]s"
+}
+
 resource "aws_lex_bot" "test" {
   abort_statement {
     message {
@@ -125,21 +153,25 @@ resource "aws_lex_bot" "test" {
     }
   }
 
+  description = "Bot to order flowers on the behalf of a user"
+
+  idle_session_ttl_in_seconds = 600
+
   intent {
-    intent_name    = "OrderFlowers"
-    intent_version = "1"
+    intent_name    = "${aws_lex_intent.test_intent_one.name}"
+    intent_version = "${aws_lex_intent.test_intent_one.version}"
   }
 
-  name             = "%[1]s"
+  locale           = "en-US"
+  name             = "test_bot_%[1]s"
   process_behavior = "SAVE"
+  voice_id         = "Salli"
 }
 
 resource "aws_lex_bot_alias" "test" {
   bot_name    = "${aws_lex_bot.test.name}"
   bot_version = "${aws_lex_bot.test.version}"
   description = "Testing lex bot alias update."
-  name        = "%[1]s"
-
-  depends_on  = ["aws_lex_bot.test"]
+  name        = "test_bot_alias_%[1]s"
 }
 `

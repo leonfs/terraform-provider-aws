@@ -6,21 +6,21 @@ import (
 	"github.com/hashicorp/terraform/helper/acctest"
 )
 
-func TestValidateLexNameTooShort(t *testing.T) {
-	_, errs := validateLexName("", "name")
+func TestValidateStringMinMaxRegexTooShort(t *testing.T) {
+	_, errs := validateStringMinMaxRegex(lexNameMinLength, lexNameMaxLength, lexNameRegex)("", "name")
 	if len(errs) == 0 {
-		t.Fatalf("an empty string should be an invalid Lex name")
+		t.Fatalf("an empty string should return an error")
 	}
 }
 
-func TestValidateLexNameTooLong(t *testing.T) {
-	_, errs := validateLexName(acctest.RandString(lexNameMaxLength+1), "name")
+func TestValidateStringMinMaxRegexTooLong(t *testing.T) {
+	_, errs := validateStringMinMaxRegex(lexNameMinLength, lexNameMaxLength, lexNameRegex)(acctest.RandString(lexNameMaxLength+1), "name")
 	if len(errs) == 0 {
-		t.Fatalf("a %d character string should be an invalid Lex name", lexNameMaxLength)
+		t.Fatalf("a %d character string should return an error", lexNameMaxLength+1)
 	}
 }
 
-func TestValidateLexNameInvalidCharacters(t *testing.T) {
+func TestValidateStringMinMaxRegexInvalidCharacters(t *testing.T) {
 	invalidNames := []string{
 		"1test",
 		"test-one",
@@ -32,14 +32,14 @@ func TestValidateLexNameInvalidCharacters(t *testing.T) {
 	}
 
 	for _, invalidName := range invalidNames {
-		_, errs := validateLexName(invalidName, "name")
+		_, errs := validateStringMinMaxRegex(lexNameMinLength, lexNameMaxLength, lexNameRegex)(invalidName, "name")
 		if len(errs) == 0 {
 			t.Fatalf("%q should be an invalid Lex name", invalidName)
 		}
 	}
 }
 
-func TestValidateLexNameValid(t *testing.T) {
+func TestValidateStringMinMaxRegexValid(t *testing.T) {
 	validNames := []string{
 		"test",
 		"test_one",
@@ -52,84 +52,9 @@ func TestValidateLexNameValid(t *testing.T) {
 	}
 
 	for _, validName := range validNames {
-		_, errs := validateLexName(validName, "name")
+		_, errs := validateStringMinMaxRegex(lexNameMinLength, lexNameMaxLength, lexNameRegex)(validName, "name")
 		if len(errs) > 0 {
 			t.Fatalf("%q should be a valid Lex name, got %v", validName, errs)
-		}
-	}
-}
-
-func TestValidateLexVersionTooShort(t *testing.T) {
-	_, errs := validateLexVersion("", "version")
-	if len(errs) == 0 {
-		t.Fatalf("an empty string should be an invalid Lex version")
-	}
-}
-
-func TestValidateLexVersionTooLong(t *testing.T) {
-	version := acctest.RandStringFromCharSet(lexVersionMaxLength+1, "0123456789")
-
-	_, errs := validateLexVersion(version, "version")
-	if len(errs) == 0 {
-		t.Fatalf("%q should be an invalid Lex version", version)
-	}
-}
-
-func TestValidateLexVersionInvalidCharacters(t *testing.T) {
-	invalidVersions := []string{
-		"one",
-		"LATEST",
-	}
-
-	for _, invalidVersion := range invalidVersions {
-		_, errs := validateLexVersion(invalidVersion, "version")
-		if len(errs) == 0 {
-			t.Fatalf("%q should be an invalid Lex version", invalidVersion)
-		}
-	}
-}
-
-func TestValidateLexVersionValid(t *testing.T) {
-	validVersions := []string{
-		"0",
-		"1",
-		"11",
-		"$LATEST",
-	}
-
-	for _, validVersion := range validVersions {
-		_, errs := validateLexVersion(validVersion, "version")
-		if len(errs) > 0 {
-			t.Fatalf("%q should be a valid Lex version, got %v", validVersion, errs)
-		}
-	}
-}
-
-func TestValidateLexMessageContentTypeInvalidType(t *testing.T) {
-	invalidTypes := []string{
-		"test",
-		"JSON",
-	}
-
-	for _, invalidType := range invalidTypes {
-		_, errs := validateLexMessageContentType(invalidType, "content_type")
-		if len(errs) == 0 {
-			t.Fatalf("%q should be an invalid Lex message content type, got %v", invalidType, errs)
-		}
-	}
-}
-
-func TestValidateLexMessageContentTypeValid(t *testing.T) {
-	validTypes := []string{
-		"PlainText",
-		"SSML",
-		"CustomPayload",
-	}
-
-	for _, validType := range validTypes {
-		_, errs := validateLexMessageContentType(validType, "content_type")
-		if len(errs) > 0 {
-			t.Fatalf("%q should be a valid Lex message content type, got %v", validType, errs)
 		}
 	}
 }

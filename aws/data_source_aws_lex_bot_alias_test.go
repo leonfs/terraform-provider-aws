@@ -6,12 +6,11 @@ import (
 
 	"github.com/hashicorp/terraform/helper/acctest"
 	"github.com/hashicorp/terraform/helper/resource"
-	"github.com/hashicorp/terraform/terraform"
 )
 
 func TestAccDataSourceLexBotAlias(t *testing.T) {
 	resourceName := "aws_lex_bot_alias.test"
-	testId := "test_bot_alias_" + acctest.RandStringFromCharSet(8, acctest.CharSetAlpha)
+	testId := acctest.RandStringFromCharSet(8, acctest.CharSetAlpha)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:  func() { testAccPreCheck(t) },
@@ -20,33 +19,22 @@ func TestAccDataSourceLexBotAlias(t *testing.T) {
 			{
 				Config: fmt.Sprintf(testDataSourceLexBotAliasConfig, testId),
 				Check: resource.ComposeTestCheckFunc(
-					checkLexBotAliasDataSource(resourceName),
+					checkResourceStateComputedAttr(resourceName, dataSourceAwsLexBotAlias()),
 				),
 			},
 		},
 	})
 }
 
-func checkLexBotAliasDataSource(resourceName string) resource.TestCheckFunc {
-	return func(s *terraform.State) error {
-		actualResource, ok := s.RootModule().Resources[resourceName]
-		if !ok {
-			return fmt.Errorf("root module has no resource called %s", resourceName)
-		}
+const testDataSourceLexBotAliasConfig = `
+resource "aws_lex_intent" "test" {
+  fulfillment_activity {
+    type = "ReturnIntent"
+  }
 
-		// Ensure the state is populated with all attributes defined for the resource.
-		expectedResource := dataSourceAwsLexBotAlias()
-		for k := range expectedResource.Schema {
-			if _, ok := actualResource.Primary.Attributes[k]; !ok {
-				return fmt.Errorf("state missing attribute %s", k)
-			}
-		}
-
-		return nil
-	}
+  name = "test_intent_%[1]s"
 }
 
-const testDataSourceLexBotAliasConfig = `
 resource "aws_lex_bot" "test" {
   abort_statement {
     message {
@@ -66,18 +54,18 @@ resource "aws_lex_bot" "test" {
     }
   }
 
-  intent {
-    intent_name    = "OrderFlowers"
-    intent_version = "1"
-  }
+  name = "test_bot_%[1]s"
 
-  name             = "%[1]s"
+  intent {
+    intent_name    = "${aws_lex_intent.test.name}"
+    intent_version = "${aws_lex_intent.test.version}"
+  }
 }
 
 resource "aws_lex_bot_alias" "test" {
   bot_name    = "${aws_lex_bot.test.name}"
   bot_version = "${aws_lex_bot.test.version}"
-  name        = "%[1]s"
+  name        = "test_bot_alias_%[1]s"
 }
 
 data "aws_lex_bot_alias" "test" {

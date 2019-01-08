@@ -6,12 +6,11 @@ import (
 
 	"github.com/hashicorp/terraform/helper/acctest"
 	"github.com/hashicorp/terraform/helper/resource"
-	"github.com/hashicorp/terraform/terraform"
 )
 
 func TestAccDataSourceLexBot(t *testing.T) {
 	resourceName := "aws_lex_bot.test"
-	testId := "test_bot_" + acctest.RandStringFromCharSet(8, acctest.CharSetAlpha)
+	testId := acctest.RandStringFromCharSet(8, acctest.CharSetAlpha)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:  func() { testAccPreCheck(t) },
@@ -20,41 +19,26 @@ func TestAccDataSourceLexBot(t *testing.T) {
 			{
 				Config: fmt.Sprintf(testDataSourceLexBotConfig, testId),
 				Check: resource.ComposeTestCheckFunc(
-					checkLexBotDataSource(resourceName),
+					checkResourceStateComputedAttr(resourceName, dataSourceAwsLexBot()),
 				),
 			},
 		},
 	})
 }
 
-func checkLexBotDataSource(resourceName string) resource.TestCheckFunc {
-	return func(s *terraform.State) error {
-		actualResource, ok := s.RootModule().Resources[resourceName]
-		if !ok {
-			return fmt.Errorf("root module has no resource called %s", resourceName)
-		}
+const testDataSourceLexBotConfig = `
+resource "aws_lex_intent" "test" {
+  fulfillment_activity {
+    type = "ReturnIntent"
+  }
 
-		// Ensure the state is populated with all attributes defined for the resource.
-		expectedResource := dataSourceAwsLexBot()
-		for k := range expectedResource.Schema {
-			if k == "version_or_alias" {
-				continue
-			}
-
-			if _, ok := actualResource.Primary.Attributes[k]; !ok {
-				return fmt.Errorf("state missing attribute %s", k)
-			}
-		}
-
-		return nil
-	}
+  name = "test_intent_%[1]s"
 }
 
-const testDataSourceLexBotConfig = `
 resource "aws_lex_bot" "test" {
   abort_statement {
     message {
-      content      = "Sorry, I am not able to assist at this time"
+      content      = "Sorry, I'm not able to assist at this time"
       content_type = "PlainText"
     }
   }
@@ -70,16 +54,19 @@ resource "aws_lex_bot" "test" {
     }
   }
 
+  description = "Bot to order flowers on the behalf of a user"
+
   intent {
-    intent_name    = "OrderFlowers"
-    intent_version = "1"
+    intent_name    = "${aws_lex_intent.test.name}"
+    intent_version = "${aws_lex_intent.test.version}"
   }
 
-  name             = "%s"
+  name     = "test_bot_%[1]s"
+  voice_id = "Salli"
 }
 
 data "aws_lex_bot" "test" {
-  name             = "${aws_lex_bot.test.name}"
-  version_or_alias = "$LATEST"
+  name    = "${aws_lex_bot.test.name}"
+  version = "${aws_lex_bot.test.version}"
 }
 `

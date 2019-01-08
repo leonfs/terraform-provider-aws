@@ -14,31 +14,25 @@ import (
 
 func TestAccLexSlotType(t *testing.T) {
 	resourceName := "aws_lex_slot_type.test"
-	testId := "test_slot_type_" + acctest.RandStringFromCharSet(8, acctest.CharSetAlpha)
+	testId := acctest.RandStringFromCharSet(8, acctest.CharSetAlpha)
+	testSlotTypeId := "test_slot_type_" + testId
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
-		CheckDestroy: checkLexSlotTypeDestroy(testId),
+		CheckDestroy: checkLexSlotTypeDestroy(testSlotTypeId),
 		Steps: []resource.TestStep{
 			{
 				Config: fmt.Sprintf(testLexSlotTypeConfig, testId),
 				Check: resource.ComposeTestCheckFunc(
-					// Validate AWS state
-
-					checkLexSlotTypeCreate(testId),
-
-					// Validate Terraform state
-
 					testCheckResourceAttrPrefixSet(resourceName, "enumeration_value"),
 
-					resource.TestCheckResourceAttrSet(resourceName, "checksum"),
-					resource.TestCheckResourceAttrSet(resourceName, "created_date"),
-					resource.TestCheckResourceAttrSet(resourceName, "description"),
-					resource.TestCheckResourceAttrSet(resourceName, "last_updated_date"),
 					resource.TestCheckResourceAttrSet(resourceName, "name"),
+					resource.TestCheckResourceAttrSet(resourceName, "description"),
 					resource.TestCheckResourceAttrSet(resourceName, "value_selection_strategy"),
 					resource.TestCheckResourceAttrSet(resourceName, "version"),
+
+					checkResourceStateComputedAttr(resourceName, resourceAwsLexSlotType()),
 				),
 			},
 			{
@@ -49,89 +43,25 @@ func TestAccLexSlotType(t *testing.T) {
 			{
 				Config: fmt.Sprintf(testLexSlotTypeUpdateConfig, testId),
 				Check: resource.ComposeTestCheckFunc(
-					// Validate AWS state
-
-					checkLexSlotTypeUpdate(testId),
-
-					// Validate Terraform state
-
 					resource.TestCheckResourceAttr(resourceName, "description", "Allowed flower types"),
 					resource.TestCheckResourceAttr(resourceName, "value_selection_strategy", "TOP_RESOLUTION"),
+
+					checkResourceStateComputedAttr(resourceName, resourceAwsLexSlotType()),
 				),
 			},
 		},
 	})
 }
 
-func getLexSlotType(id string) (*lexmodelbuildingservice.GetSlotTypeOutput, error) {
-	conn := testAccProvider.Meta().(*AWSClient).lexmodelconn
-	return conn.GetSlotType(&lexmodelbuildingservice.GetSlotTypeInput{
-		Name:    aws.String(id),
-		Version: aws.String("$LATEST"),
-	})
-}
-
-func checkLexSlotTypeCreate(id string) resource.TestCheckFunc {
-	return func(s *terraform.State) error {
-		slotType, err := getLexSlotType(id)
-		if err != nil {
-			aerr, ok := err.(awserr.Error)
-			if ok && aerr.Code() == "NotFoundException" {
-				return fmt.Errorf("slot type does not exist, %s", id)
-			}
-
-			return fmt.Errorf("could not get Lex slot type, %s", id)
-		}
-
-		if slotType.EnumerationValues == nil {
-			return fmt.Errorf("slot type EnumerationValues is nil")
-		}
-		if len(slotType.EnumerationValues) != 1 {
-			return fmt.Errorf("slot type should have 1 enumeration value")
-		}
-		if slotType.EnumerationValues[0].Synonyms == nil {
-			return fmt.Errorf("slot type enumeration value Synonyms is nil")
-		}
-		if len(slotType.EnumerationValues[0].Synonyms) != 1 {
-			return fmt.Errorf("slot type enumeration value should have 1 synonym")
-		}
-
-		return nil
-	}
-}
-
-func checkLexSlotTypeUpdate(id string) resource.TestCheckFunc {
-	return func(s *terraform.State) error {
-		slotType, err := getLexSlotType(id)
-		if err != nil {
-			aerr, ok := err.(awserr.Error)
-			if ok && aerr.Code() == "NotFoundException" {
-				return fmt.Errorf("slot type does not exist, %s", id)
-			}
-
-			return fmt.Errorf("could not get Lex slot type, %s", id)
-		}
-
-		if slotType.EnumerationValues == nil {
-			return fmt.Errorf("slot type EnumerationValues is nil")
-		}
-		if len(slotType.EnumerationValues) != 2 {
-			return fmt.Errorf("slot type should have 2 enumeration values")
-		}
-		if slotType.EnumerationValues[0].Synonyms == nil {
-			return fmt.Errorf("slot type enumeration value Synonyms is nil")
-		}
-		if len(slotType.EnumerationValues[0].Synonyms) != 2 {
-			return fmt.Errorf("slot type enumeration value should have 2 synonyms")
-		}
-
-		return nil
-	}
-}
-
 func checkLexSlotTypeDestroy(id string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		_, err := getLexSlotType(id)
+		conn := testAccProvider.Meta().(*AWSClient).lexmodelconn
+
+		_, err := conn.GetSlotType(&lexmodelbuildingservice.GetSlotTypeInput{
+			Name:    aws.String(id),
+			Version: aws.String("$LATEST"),
+		})
+
 		if err != nil {
 			aerr, ok := err.(awserr.Error)
 			if ok && aerr.Code() == "NotFoundException" {
@@ -153,10 +83,11 @@ resource "aws_lex_slot_type" "test" {
     synonyms = [
       "Lirium",
     ]
-    value    = "lilies"
+
+    value = "lilies"
   }
 
-  name                     = "%s"
+  name                     = "test_slot_type_%s"
   value_selection_strategy = "ORIGINAL_VALUE"
 }
 `
@@ -183,7 +114,7 @@ resource "aws_lex_slot_type" "test" {
     value = "tulips"
   }
 
-  name                     = "%s"
+  name                     = "test_slot_type_%s"
   value_selection_strategy = "TOP_RESOLUTION"
 }
 `

@@ -1,22 +1,22 @@
 package aws
 
 import (
+	"fmt"
 	"regexp"
+	"strings"
 
+	"github.com/hashicorp/terraform/helper/resource"
+	"github.com/hashicorp/terraform/helper/schema"
 	"github.com/hashicorp/terraform/helper/validation"
+	"github.com/hashicorp/terraform/terraform"
 )
 
-const (
-	// General constants
+// Amazon Lex Resource Constants. Data models are documented here
+// https://docs.aws.amazon.com/lex/latest/dg/API_Types_Amazon_Lex_Model_Building_Service.html
 
-	// The documented bot name regex isn't the same regex the AWS API validates against.
-	// http://docs.aws.amazon.com/lex/latest/dg/API_PutBot.html
-	//
-	// It appears the AWS API is validating against the botName regex documented for bot aliases.
-	// https://docs.aws.amazon.com/lex/latest/dg/API_PutBotAlias.html
-	//
-	// Intent names are using the same regex for validation
-	// https://docs.aws.amazon.com/lex/latest/dg/API_PutIntent.html
+const (
+
+	// General
 
 	lexNameMinLength = 1
 	lexNameMaxLength = 100
@@ -25,72 +25,128 @@ const (
 	lexVersionMinLength = 1
 	lexVersionMaxLength = 64
 	lexVersionRegex     = "\\$LATEST|[0-9]+"
+	lexVersionDefault   = "$LATEST"
 
+	lexDescriptionMinLength = 0
 	lexDescriptionMaxLength = 200
+	lexDescriptionDefault   = ""
 
-	// Bot constants
+	// Bot
 
-	lexBotIdleSessionTtlMin = 60
-	lexBotIdleSessionTtlMax = 86400
-	lexBotMaxIntents        = 100
+	lexBotNameMinLength         = 2
+	lexBotNameMaxLength         = 50
+	lexBotIdleSessionTtlMin     = 60
+	lexBotIdleSessionTtlMax     = 86400
+	lexBotIdleSessionTtlDefault = 300
+	lexBotMinIntents            = 1
+	lexBotMaxIntents            = 100
 
-	// Message constants
+	// Message
 
 	lexMessageContentMinLength = 1
 	lexMessageContentMaxLength = 1000
+	lexMessageGroupNumberMin   = 1
+	lexMessageGroupNumberMax   = 5
 
-	// Statement constants
+	// Statement
 
 	lexResponseCardMinLength = 1
 	lexResponseCardMaxLength = 50000
+	lexStatementMessagesMin  = 1
+	lexStatementMessagesMax  = 15
 
-	// Prompt constants
+	// Prompt
 
 	lexPromptMaxAttemptsMin = 1
 	lexPromptMaxAttemptsMax = 5
 
-	// Slot type constants
+	// Code Hook
 
-	lexSlotTypeMinEnumerationValues = 1
-	lexSlotTypeMaxEnumerationValues = 10000
+	lexCodeHookMessageVersionMinLength = 1
+	lexCodeHookMessageVersionMaxLength = 5
 
-	// Enumeration value constants
+	// Slot
 
+	lexSlotsMin                = 0
+	lexSlotsMax                = 100
+	lexSlotPriorityMin         = 0
+	lexSlotPriorityMax         = 100
+	lexSlotPriorityDefault     = 0
+	lexSlotSampleUtterancesMin = 1
+	lexSlotSampleUtterancesMax = 10
+
+	// Slot Type
+
+	lexSlotTypeMinLength                     = 1
+	lexSlotTypeMaxLength                     = 100
+	lexSlotTypeRegex                         = "^((AMAZON\\.)_?|[A-Za-z]_?)+"
+	lexSlotTypeValueSelectionStrategyDefault = "ORIGINAL_VALUE"
+
+	// Utterance
+
+	lexUtterancesMin      = 0
+	lexUtterancesMax      = 1500
+	lexUtteranceMinLength = 1
+	lexUtteranceMaxLength = 200
+
+	// Enumeration Value
+
+	lexEnumerationValuesMin             = 1
+	lexEnumerationValuesMax             = 10000
 	lexEnumerationValueSynonymMinLength = 1
 	lexEnumerationValueSynonymMaxLength = 140
 	lexEnumerationValueMinLength        = 1
 	lexEnumerationValueMaxLength        = 140
 )
 
-func validateLexName(v interface{}, k string) (ws []string, errors []error) {
-	ws, errors = validation.StringLenBetween(lexNameMinLength, lexNameMaxLength)(v, k)
-	if len(errors) > 0 {
-		return ws, errors
+func validateStringMinMaxRegex(min, max int, regex string) schema.SchemaValidateFunc {
+	return func(v interface{}, k string) (ws []string, errors []error) {
+		ws, errors = validation.StringLenBetween(min, max)(v, k)
+		if len(errors) > 0 {
+			return ws, errors
+		}
+
+		return validation.StringMatch(regexp.MustCompile(regex), "")(v, k)
 	}
-
-	return validation.StringMatch(regexp.MustCompile(lexNameRegex), "")(v, k)
 }
 
-func validateLexVersion(v interface{}, k string) (ws []string, errors []error) {
-	ws, errors = validation.StringLenBetween(lexVersionMinLength, lexVersionMaxLength)(v, k)
-	if len(errors) > 0 {
-		return ws, errors
+func testCheckResourceAttrPrefixSet(resourceName, prefix string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		rm := s.RootModule()
+		rs, ok := rm.Resources[resourceName]
+
+		if !ok {
+			return fmt.Errorf("resource does not exist in state, %s", resourceName)
+		}
+
+		for attr := range rs.Primary.Attributes {
+			if strings.HasPrefix(attr, prefix+".") {
+				return nil
+			}
+		}
+
+		return fmt.Errorf("resource attribute prefix does not exist in state, %s", prefix)
 	}
-
-	return validation.StringMatch(regexp.MustCompile(lexVersionRegex), "")(v, k)
 }
 
-func validateLexMessageContentType(v interface{}, k string) (ws []string, errors []error) {
-	return validation.StringInSlice([]string{
-		"PlainText",
-		"SSML",
-		"CustomPayload",
-	}, false)(v, k)
-}
+func checkResourceStateComputedAttr(resourceName string, expectedResource *schema.Resource) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		actualResource, ok := s.RootModule().Resources[resourceName]
+		if !ok {
+			return fmt.Errorf("root module has no resource called %s", resourceName)
+		}
 
-func validateLexSlotSelectionStrategy(v interface{}, k string) (ws []string, errors []error) {
-	return validation.StringInSlice([]string{
-		"ORIGINAL_VALUE",
-		"TOP_RESOLUTION",
-	}, false)(v, k)
+		// Ensure the state is populated with all the computed attributes defined by the resource schema.
+		for k, v := range expectedResource.Schema {
+			if !v.Computed {
+				continue
+			}
+
+			if _, ok := actualResource.Primary.Attributes[k]; !ok {
+				return fmt.Errorf("state missing attribute %s", k)
+			}
+		}
+
+		return nil
+	}
 }

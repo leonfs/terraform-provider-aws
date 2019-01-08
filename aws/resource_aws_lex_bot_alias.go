@@ -8,6 +8,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/service/lexmodelbuildingservice"
 	"github.com/hashicorp/terraform/helper/schema"
+	"github.com/hashicorp/terraform/helper/validation"
 )
 
 func resourceAwsLexBotAlias() *schema.Resource {
@@ -25,12 +26,12 @@ func resourceAwsLexBotAlias() *schema.Resource {
 				Type:         schema.TypeString,
 				Required:     true,
 				ForceNew:     true,
-				ValidateFunc: validateLexName,
+				ValidateFunc: validateStringMinMaxRegex(lexBotNameMinLength, lexBotNameMaxLength, lexNameRegex),
 			},
 			"bot_version": {
 				Type:         schema.TypeString,
 				Required:     true,
-				ValidateFunc: validateLexVersion,
+				ValidateFunc: validateStringMinMaxRegex(lexVersionMinLength, lexVersionMaxLength, lexVersionRegex),
 			},
 			"checksum": {
 				Type:     schema.TypeString,
@@ -44,7 +45,7 @@ func resourceAwsLexBotAlias() *schema.Resource {
 				Type:         schema.TypeString,
 				Optional:     true,
 				Default:      "",
-				ValidateFunc: validateMaxLength(lexDescriptionMaxLength),
+				ValidateFunc: validation.StringLenBetween(lexDescriptionMinLength, lexDescriptionMaxLength),
 			},
 			"last_updated_date": {
 				Type:     schema.TypeString,
@@ -54,7 +55,7 @@ func resourceAwsLexBotAlias() *schema.Resource {
 				Type:         schema.TypeString,
 				Required:     true,
 				ForceNew:     true,
-				ValidateFunc: validateLexName,
+				ValidateFunc: validateStringMinMaxRegex(lexNameMinLength, lexNameMaxLength, lexNameRegex),
 			},
 		},
 	}
@@ -64,14 +65,20 @@ func resourceAwsLexBotAliasCreate(d *schema.ResourceData, meta interface{}) erro
 	conn := meta.(*AWSClient).lexmodelconn
 	name := d.Get("name").(string)
 
-	_, err := conn.PutBotAlias(&lexmodelbuildingservice.PutBotAliasInput{
-		BotName:     aws.String(d.Get("bot_name").(string)),
-		BotVersion:  aws.String(d.Get("bot_version").(string)),
-		Description: aws.String(d.Get("description").(string)),
-		Name:        aws.String(name),
-	})
-	if err != nil {
-		return fmt.Errorf("error creating Lex bot alias %s: %s", name, err)
+	input := &lexmodelbuildingservice.PutBotAliasInput{
+		BotName:    aws.String(d.Get("bot_name").(string)),
+		BotVersion: aws.String(d.Get("bot_version").(string)),
+		Name:       aws.String(name),
+	}
+
+	// optional attributes
+
+	if v, ok := d.GetOk("description"); ok {
+		input.Description = aws.String(v.(string))
+	}
+
+	if _, err := conn.PutBotAlias(input); err != nil {
+		return fmt.Errorf("error creating Lex Bot Alias %s: %s", name, err)
 	}
 
 	d.SetId(name)
@@ -84,10 +91,10 @@ func resourceAwsLexBotAliasRead(d *schema.ResourceData, meta interface{}) error 
 
 	resp, err := conn.GetBotAlias(&lexmodelbuildingservice.GetBotAliasInput{
 		BotName: aws.String(d.Get("bot_name").(string)),
-		Name:    aws.String(d.Get("name").(string)),
+		Name:    aws.String(d.Id()),
 	})
 	if err != nil {
-		return fmt.Errorf("error getting Lex bot alias: %s", err)
+		return fmt.Errorf("error getting Lex Bot Alias: %s", err)
 	}
 
 	d.Set("bot_name", resp.BotName)
@@ -103,7 +110,6 @@ func resourceAwsLexBotAliasRead(d *schema.ResourceData, meta interface{}) error 
 
 func resourceAwsLexBotAliasUpdate(d *schema.ResourceData, meta interface{}) error {
 	conn := meta.(*AWSClient).lexmodelconn
-	hasChanges := false
 
 	input := &lexmodelbuildingservice.PutBotAliasInput{
 		BotName:    aws.String(d.Get("bot_name").(string)),
@@ -112,16 +118,14 @@ func resourceAwsLexBotAliasUpdate(d *schema.ResourceData, meta interface{}) erro
 		Name:       aws.String(d.Id()),
 	}
 
-	if d.HasChange("description") {
-		input.Description = aws.String(d.Get("description").(string))
-		hasChanges = true
+	// optional attributes
+
+	if v, ok := d.GetOk("description"); ok {
+		input.Description = aws.String(v.(string))
 	}
 
-	if hasChanges {
-		_, err := conn.PutBotAlias(input)
-		if err != nil {
-			return fmt.Errorf("error updating Lex bot alias %s: %s", d.Id(), err)
-		}
+	if _, err := conn.PutBotAlias(input); err != nil {
+		return fmt.Errorf("error creating Lex Bot Alias %s: %s", d.Id(), err)
 	}
 
 	return resourceAwsLexBotAliasRead(d, meta)
@@ -133,16 +137,20 @@ func resourceAwsLexBotAliasDelete(d *schema.ResourceData, meta interface{}) erro
 	botName := d.Get("bot_name").(string)
 	name := d.Get("name").(string)
 
-	_, err := conn.DeleteBotAlias(&lexmodelbuildingservice.DeleteBotAliasInput{
-		BotName: aws.String(botName),
-		Name:    aws.String(name),
+	_, err := retryOnAwsCode("ConflictException", func() (interface{}, error) {
+		return conn.DeleteBotAlias(&lexmodelbuildingservice.DeleteBotAliasInput{
+			BotName: aws.String(botName),
+			Name:    aws.String(name),
+		})
 	})
+
 	if err != nil {
-		return fmt.Errorf("error deleteing Lex bot alias %s: %s", d.Id(), err)
+		return fmt.Errorf("error deleteing Lex Bot Alias %s: %s", d.Id(), err)
 	}
 
-	// Ensure the bot aliases is actually deleted before moving on. This avoids issues with
-	// deleting bots that have associated bot aliases.
+	// Ensure the bot alias is actually deleted before moving on. This avoids issues with deleting bots that have
+	// associated bot aliases.
+
 	for {
 		_, err := conn.GetBotAlias(&lexmodelbuildingservice.GetBotAliasInput{
 			BotName: aws.String(botName),
@@ -151,20 +159,20 @@ func resourceAwsLexBotAliasDelete(d *schema.ResourceData, meta interface{}) erro
 		if err != nil {
 			aerr, ok := err.(awserr.Error)
 			if ok && aerr.Code() == "NotFoundException" {
-				return nil
+				break
 			}
 
-			return fmt.Errorf("could not get Lex bot alias, %s %s", botName, name)
+			return fmt.Errorf("could not get Lex Bot Alias, %s %s", botName, name)
 		}
 	}
 
 	return nil
 }
 
-func resourceAwsLexBotAliasImport(d *schema.ResourceData, meta interface{}) ([]*schema.ResourceData, error) {
+func resourceAwsLexBotAliasImport(d *schema.ResourceData, _ interface{}) ([]*schema.ResourceData, error) {
 	parts := strings.Split(d.Id(), ".")
 	if len(parts) != 2 {
-		return nil, fmt.Errorf("invalid bot alias resource id, expected BOT_NAME.BOT_ALIAS_NAME")
+		return nil, fmt.Errorf("invalid Lex Bot Alias resource id, expected BOT_NAME.BOT_ALIAS_NAME")
 	}
 
 	d.SetId(parts[1])

@@ -23,6 +23,7 @@ func resourceAwsLexBot() *schema.Resource {
 			"abort_statement": {
 				Type:     schema.TypeList,
 				Required: true,
+				MinItems: 1,
 				MaxItems: 1,
 				Elem:     lexStatementResource,
 			},
@@ -37,6 +38,7 @@ func resourceAwsLexBot() *schema.Resource {
 			"clarification_prompt": {
 				Type:     schema.TypeList,
 				Required: true,
+				MinItems: 1,
 				MaxItems: 1,
 				Elem:     lexPromptResource,
 			},
@@ -47,8 +49,8 @@ func resourceAwsLexBot() *schema.Resource {
 			"description": {
 				Type:         schema.TypeString,
 				Optional:     true,
-				Default:      "",
-				ValidateFunc: validation.StringLenBetween(0, lexDescriptionMaxLength),
+				Default:      lexDescriptionDefault,
+				ValidateFunc: validation.StringLenBetween(lexDescriptionMinLength, lexDescriptionMaxLength),
 			},
 			"failure_reason": {
 				Type:     schema.TypeString,
@@ -57,12 +59,13 @@ func resourceAwsLexBot() *schema.Resource {
 			"idle_session_ttl_in_seconds": {
 				Type:         schema.TypeInt,
 				Optional:     true,
-				Default:      300,
+				Default:      lexBotIdleSessionTtlDefault,
 				ValidateFunc: validation.IntBetween(lexBotIdleSessionTtlMin, lexBotIdleSessionTtlMax),
 			},
 			"intent": {
-				Type:     schema.TypeList,
+				Type:     schema.TypeSet,
 				Required: true,
+				MinItems: lexBotMinIntents,
 				MaxItems: lexBotMaxIntents,
 				Elem:     lexIntentResource,
 			},
@@ -74,26 +77,32 @@ func resourceAwsLexBot() *schema.Resource {
 				Type:     schema.TypeString,
 				Optional: true,
 				ForceNew: true,
-				Default:  "en-US",
+				Default:  lexmodelbuildingservice.LocaleEnUs,
 			},
 			"name": {
 				Type:         schema.TypeString,
 				Required:     true,
 				ForceNew:     true,
-				ValidateFunc: validateLexName,
+				ValidateFunc: validateStringMinMaxRegex(lexNameMinLength, lexNameMaxLength, lexNameRegex),
 			},
 			"process_behavior": {
 				Type:     schema.TypeString,
 				Optional: true,
-				Default:  "SAVE",
+				Default:  lexmodelbuildingservice.ProcessBehaviorSave,
+				ValidateFunc: validation.StringInSlice([]string{
+					lexmodelbuildingservice.ProcessBehaviorBuild,
+					lexmodelbuildingservice.ProcessBehaviorSave,
+				}, false),
 			},
 			"status": {
 				Type:     schema.TypeString,
 				Computed: true,
 			},
 			"version": {
-				Type:     schema.TypeString,
-				Computed: true,
+				Type:         schema.TypeString,
+				Optional:     true,
+				Default:      lexVersionDefault,
+				ValidateFunc: validateStringMinMaxRegex(lexVersionMinLength, lexVersionMaxLength, lexVersionRegex),
 			},
 			"voice_id": {
 				Type:     schema.TypeString,
@@ -109,21 +118,28 @@ func resourceAwsLexBotCreate(d *schema.ResourceData, meta interface{}) error {
 	name := d.Get("name").(string)
 
 	input := &lexmodelbuildingservice.PutBotInput{
-		AbortStatement:          expandLexStatement(d.Get("abort_statement")),
+		AbortStatement:          expandLexStatement(expandLexObject(d.Get("abort_statement"))),
 		ChildDirected:           aws.Bool(d.Get("child_directed").(bool)),
-		ClarificationPrompt:     expandLexPrompt(d.Get("clarification_prompt")),
-		Description:             aws.String(d.Get("description").(string)),
+		ClarificationPrompt:     expandLexPrompt(expandLexObject(d.Get("clarification_prompt"))),
 		IdleSessionTTLInSeconds: aws.Int64(int64(d.Get("idle_session_ttl_in_seconds").(int))),
-		Intents:                 expandLexIntents(d.Get("intent")),
+		Intents:                 expandLexIntents(expandLexSet(d.Get("intent").(*schema.Set))),
 		Locale:                  aws.String(d.Get("locale").(string)),
 		Name:                    aws.String(name),
 		ProcessBehavior:         aws.String(d.Get("process_behavior").(string)),
-		VoiceId:                 aws.String(d.Get("voice_id").(string)),
 	}
 
-	_, err := conn.PutBot(input)
-	if err != nil {
-		return fmt.Errorf("error creating Lex bot %s: %s", name, err)
+	// optional attributes
+
+	if v, ok := d.GetOk("description"); ok {
+		input.Description = aws.String(v.(string))
+	}
+
+	if v, ok := d.GetOk("voice_id"); ok {
+		input.VoiceId = aws.String(v.(string))
+	}
+
+	if _, err := conn.PutBot(input); err != nil {
+		return fmt.Errorf("error creating Lex Bot %s: %s", name, err)
 	}
 
 	d.SetId(name)
@@ -134,109 +150,81 @@ func resourceAwsLexBotCreate(d *schema.ResourceData, meta interface{}) error {
 func resourceAwsLexBotRead(d *schema.ResourceData, meta interface{}) error {
 	conn := meta.(*AWSClient).lexmodelconn
 
+	version := "$LATEST"
+	if v, ok := d.GetOk("version"); ok {
+		version = v.(string)
+	}
+
 	resp, err := conn.GetBot(&lexmodelbuildingservice.GetBotInput{
 		Name:           aws.String(d.Id()),
-		VersionOrAlias: aws.String("$LATEST"),
+		VersionOrAlias: aws.String(version),
 	})
 	if err != nil {
-		return fmt.Errorf("error getting Lex bot: %s", err)
+		return fmt.Errorf("error getting Lex Bot: %s", err)
 	}
 
-	if resp.AbortStatement != nil {
-		d.Set("abort_statement", flattenLexStatement(resp.AbortStatement))
+	// Process behavior is not returned from the API but is used for create and update.
+	// Manually write to state file to avoid un-expected diffs.
+	processBehavior := lexmodelbuildingservice.ProcessBehaviorSave
+	if v, ok := d.GetOk("process_behavior"); ok {
+		processBehavior = v.(string)
 	}
 
-	if resp.ClarificationPrompt != nil {
-		d.Set("clarification_prompt", flattenLexPrompt(resp.ClarificationPrompt))
-	}
-
-	if resp.Intents != nil {
-		d.Set("intent", flattenLexIntents(resp.Intents))
-	}
-
+	d.Set("abort_statement", flattenLexObject(flattenLexStatement(resp.AbortStatement)))
 	d.Set("checksum", resp.Checksum)
 	d.Set("child_directed", resp.ChildDirected)
+	d.Set("clarification_prompt", flattenLexObject(flattenLexPrompt(resp.ClarificationPrompt)))
 	d.Set("created_date", resp.CreatedDate.UTC().String())
-	d.Set("description", resp.Description)
 	d.Set("failure_reason", resp.FailureReason)
 	d.Set("idle_session_ttl_in_seconds", resp.IdleSessionTTLInSeconds)
+	d.Set("intent", flattenLexIntents(resp.Intents))
 	d.Set("last_updated_date", resp.LastUpdatedDate.UTC().String())
 	d.Set("locale", resp.Locale)
 	d.Set("name", resp.Name)
+	d.Set("process_behavior", processBehavior)
 	d.Set("status", resp.Status)
 	d.Set("version", resp.Version)
-	d.Set("voice_id", resp.VoiceId)
 
-	// Process is not returned from the API but is used for create and update.
-	// Manually write to state file.
-	processBehavior := d.Get("process_behavior")
-	if processBehavior == "" {
-		processBehavior = "SAVE"
+	// optional attributes
+
+	if resp.Description != nil {
+		d.Set("description", resp.Description)
 	}
-	d.Set("process_behavior", processBehavior)
+
+	if resp.VoiceId != nil {
+		d.Set("voice_id", resp.VoiceId)
+	}
 
 	return nil
 }
 
 func resourceAwsLexBotUpdate(d *schema.ResourceData, meta interface{}) error {
 	conn := meta.(*AWSClient).lexmodelconn
-	hasChanges := false
 
 	input := &lexmodelbuildingservice.PutBotInput{
-		Name:          aws.String(d.Id()),
-		Checksum:      aws.String(d.Get("checksum").(string)),
-		ChildDirected: aws.Bool(d.Get("child_directed").(bool)),
-		Locale:        aws.String(d.Get("locale").(string)),
+		AbortStatement:          expandLexStatement(expandLexObject(d.Get("abort_statement"))),
+		Checksum:                aws.String(d.Get("checksum").(string)),
+		ChildDirected:           aws.Bool(d.Get("child_directed").(bool)),
+		ClarificationPrompt:     expandLexPrompt(expandLexObject(d.Get("clarification_prompt"))),
+		IdleSessionTTLInSeconds: aws.Int64(int64(d.Get("idle_session_ttl_in_seconds").(int))),
+		Intents:                 expandLexIntents(expandLexSet(d.Get("intent").(*schema.Set))),
+		Locale:                  aws.String(d.Get("locale").(string)),
+		Name:                    aws.String(d.Id()),
+		ProcessBehavior:         aws.String(d.Get("process_behavior").(string)),
 	}
 
-	if d.HasChange("child_directed") {
-		hasChanges = true
+	// optional attributes
+
+	if v, ok := d.GetOk("description"); ok {
+		input.Description = aws.String(v.(string))
 	}
 
-	if d.HasChange("description") {
-		input.Description = aws.String(d.Get("description").(string))
-		hasChanges = true
+	if v, ok := d.GetOk("voice_id"); ok {
+		input.VoiceId = aws.String(v.(string))
 	}
 
-	if d.HasChange("idle_session_ttl_in_seconds") {
-		input.IdleSessionTTLInSeconds = aws.Int64(int64(d.Get("idle_session_ttl_in_seconds").(int)))
-		hasChanges = true
-	}
-
-	if d.HasChange("locale") {
-		hasChanges = true
-	}
-
-	if d.HasChange("abort_statement") {
-		input.AbortStatement = expandLexStatement(d.Get("abort_statement"))
-		hasChanges = true
-	}
-
-	if d.HasChange("clarification_prompt") {
-		input.ClarificationPrompt = expandLexPrompt(d.Get("clarification_prompt"))
-		hasChanges = true
-	}
-
-	if d.HasChange("intent") {
-		input.Intents = expandLexIntents(d.Get("intent"))
-		hasChanges = true
-	}
-
-	if d.HasChange("process_behavior") {
-		input.ProcessBehavior = aws.String(d.Get("process_behavior").(string))
-		hasChanges = true
-	}
-
-	if d.HasChange("voice_id") {
-		input.VoiceId = aws.String(d.Get("voice_id").(string))
-		hasChanges = true
-	}
-
-	if hasChanges {
-		_, err := conn.PutBot(input)
-		if err != nil {
-			return fmt.Errorf("error updating Lex bot %s: %s", d.Id(), err)
-		}
+	if _, err := conn.PutBot(input); err != nil {
+		return fmt.Errorf("error creating Lex Bot %s: %s", d.Id(), err)
 	}
 
 	return resourceAwsLexBotRead(d, meta)
@@ -245,11 +233,14 @@ func resourceAwsLexBotUpdate(d *schema.ResourceData, meta interface{}) error {
 func resourceAwsLexBotDelete(d *schema.ResourceData, meta interface{}) error {
 	conn := meta.(*AWSClient).lexmodelconn
 
-	_, err := conn.DeleteBot(&lexmodelbuildingservice.DeleteBotInput{
-		Name: aws.String(d.Id()),
+	_, err := retryOnAwsCode("ConflictException", func() (interface{}, error) {
+		return conn.DeleteBot(&lexmodelbuildingservice.DeleteBotInput{
+			Name: aws.String(d.Id()),
+		})
 	})
+
 	if err != nil {
-		return fmt.Errorf("error deleteing Lex bot %s: %s", d.Id(), err)
+		return fmt.Errorf("error deleteing Lex Bot %s: %s", d.Id(), err)
 	}
 
 	return nil

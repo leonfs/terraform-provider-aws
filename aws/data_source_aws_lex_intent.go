@@ -4,20 +4,11 @@ import (
 	"github.com/hashicorp/terraform/helper/schema"
 )
 
-func dataSourceAwsLexBotAlias() *schema.Resource {
+func dataSourceAwsLexIntent() *schema.Resource {
 	return &schema.Resource{
-		Read: dataSourceAwsLexBotAliasRead,
+		Read: dataSourceAwsLexIntentRead,
 
 		Schema: map[string]*schema.Schema{
-			"bot_name": {
-				Type:         schema.TypeString,
-				Required:     true,
-				ValidateFunc: validateStringMinMaxRegex(lexBotNameMinLength, lexBotNameMaxLength, lexNameRegex),
-			},
-			"bot_version": {
-				Type:     schema.TypeString,
-				Computed: true,
-			},
 			"checksum": {
 				Type:     schema.TypeString,
 				Computed: true,
@@ -37,15 +28,26 @@ func dataSourceAwsLexBotAlias() *schema.Resource {
 			"name": {
 				Type:         schema.TypeString,
 				Required:     true,
+				ForceNew:     true,
 				ValidateFunc: validateStringMinMaxRegex(lexNameMinLength, lexNameMaxLength, lexNameRegex),
+			},
+			"parent_intent_signature": {
+				Type:     schema.TypeString,
+				Computed: true,
+			},
+			"version": {
+				Type:         schema.TypeString,
+				Optional:     true,
+				Default:      "$LATEST",
+				ValidateFunc: validateStringMinMaxRegex(lexVersionMinLength, lexVersionMaxLength, lexVersionRegex),
 			},
 		},
 	}
 }
 
-func dataSourceAwsLexBotAliasRead(d *schema.ResourceData, meta interface{}) error {
+func dataSourceAwsLexIntentRead(d *schema.ResourceData, meta interface{}) error {
 	// The data source and resource read functions are the same except the resource read expects to have the id set.
 	d.SetId(d.Get("name").(string))
 
-	return resourceAwsLexBotAliasRead(d, meta)
+	return resourceAwsLexIntentRead(d, meta)
 }
